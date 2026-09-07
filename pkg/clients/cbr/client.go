@@ -1,6 +1,9 @@
 package cbr
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/valyala/fasthttp"
 )
 
@@ -29,7 +32,8 @@ func (c *Client) GetCurrencies() (*Response, error) {
 }
 
 const (
-	cbrUrl = "https://www.cbr-xml-daily.ru/daily_json.js"
+	cbrUrl            = "https://www.cbr-xml-daily.ru/daily_json.js"
+	cbrRequestTimeout = 5 * time.Second
 )
 
 func (c *Client) getCurrencies() ([]byte, error) {
@@ -43,8 +47,12 @@ func (c *Client) getCurrencies() ([]byte, error) {
 	httpReq.Header.SetMethod(fasthttp.MethodGet)
 	httpReq.SetRequestURI(cbrUrl)
 
-	if err := c.client.Do(httpReq, httpResp); err != nil {
+	if err := c.client.DoTimeout(httpReq, httpResp, cbrRequestTimeout); err != nil {
 		return nil, err
+	}
+
+	if httpResp.StatusCode() != fasthttp.StatusOK {
+		return nil, fmt.Errorf("unexpected response status code: %d", httpResp.StatusCode())
 	}
 
 	respBody := append([]byte{}, httpResp.Body()...)

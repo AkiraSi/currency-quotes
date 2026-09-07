@@ -1,9 +1,10 @@
 package cbr
 
 import (
-	"currency-quotes/common/currencies"
 	"encoding/json"
 	"time"
+
+	"currency-quotes/common/currencies"
 )
 
 type Response struct {
@@ -44,7 +45,7 @@ func (r *Response) unmarshalJSON(b []byte) error {
 		r.Valute[key] = Currency{
 			NumCode: int64(digitCode),
 			Nominal: v.Nominal,
-			Value:   int64(v.Value * 10000),
+			Value:   int64(v.Value * currencies.RateValueScale),
 		}
 	}
 

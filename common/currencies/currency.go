@@ -3,6 +3,8 @@ package currencies
 type Currency uint16
 
 const (
+	RateValueScale = 10_000
+
 	RUB = "RUB"
 	EUR = "EUR"
 	USD = "USD"
