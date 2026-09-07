@@ -46,11 +46,6 @@ func main() {
 
 			return
 		}
-		if cfg == nil {
-			lgr.Error("rate worker configuration is not set")
-
-			return
-		}
 
 		worker = workerRate.NewWorker(cfg, lgr)
 		port = cfg.Port

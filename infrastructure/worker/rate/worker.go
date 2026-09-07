@@ -2,8 +2,6 @@ package rate
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -33,14 +31,10 @@ var (
 	errRateUnavailable     = errors.New("rate unavailable")
 )
 
-type currencySource interface {
-	GetCurrencies() (*cbr.Response, error)
-}
-
 type worker struct {
 	config         *config.Config
 	logger         commonLogger.Logger
-	source         currencySource
+	client         *cbr.Client
 	updateInterval time.Duration
 
 	ratesMu sync.RWMutex
@@ -60,17 +54,8 @@ type latestRateResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type pushRequest struct {
-	Pair string `json:"pair"`
-}
-
 type pushResponse struct {
 	UpdateID string `json:"update_id"`
-}
-
-type updateTask struct {
-	ID   string
-	Pair string
 }
 
 type updateResult struct {
@@ -85,7 +70,7 @@ func NewWorker(cfg *config.Config, lgr commonLogger.Logger) common.Worker {
 	return &worker{
 		config:         cfg,
 		logger:         lgr,
-		source:         cbr.NewClient(),
+		client:         cbr.NewClient(),
 		updateInterval: updateInterval,
 		queue:          make(chan updateTask, updateQueueCapacity),
 		updates:        make(map[string]updateResult),
@@ -195,14 +180,20 @@ func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	var request pushRequest
-	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
+	job := newJob(w.client)
+	if err := job.processMessage(ctx.PostBody()); err != nil {
 		common.WriteError(ctx, fasthttp.StatusBadRequest, "invalid request body")
 
 		return
 	}
 
-	base, quote, err := parsePair(request.Pair)
+	if job.msg.ID() == "" {
+		common.WriteError(ctx, fasthttp.StatusBadRequest, "message id is required")
+
+		return
+	}
+
+	base, quote, err := parsePair(job.msg.Pair)
 	if err != nil {
 		if errors.Is(err, errUnsupportedCurrency) {
 			common.WriteError(ctx, fasthttp.StatusNotFound, err.Error())
@@ -213,34 +204,30 @@ func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	updateID, err := newUpdateID()
-	if err != nil {
-		common.WriteError(ctx, fasthttp.StatusInternalServerError, "create update identifier")
-
-		return
-	}
-
-	task := updateTask{
-		ID:   updateID,
-		Pair: base.String() + "/" + quote.String(),
-	}
+	job.msg.Pair = base.String() + "/" + quote.String()
 
 	w.updatesMu.Lock()
-	w.updates[task.ID] = updateResult{
-		Pair:   task.Pair,
+	w.updates[job.msg.ID()] = updateResult{
+		Pair:   job.msg.Pair,
 		Status: updateStatus.UpdateStatusAccepted,
 	}
 	w.updatesMu.Unlock()
 
-	select {
-	case w.queue <- task:
-		common.WriteJSON(ctx, fasthttp.StatusAccepted, pushResponse{UpdateID: task.ID})
-	default:
+	if err := job.CreateTasks(w.queue); err != nil {
 		w.updatesMu.Lock()
-		delete(w.updates, task.ID)
+		delete(w.updates, job.msg.ID())
 		w.updatesMu.Unlock()
-		common.WriteError(ctx, fasthttp.StatusServiceUnavailable, "update queue is full")
+
+		if errors.Is(err, errUpdateQueueFull) {
+			common.WriteError(ctx, fasthttp.StatusServiceUnavailable, err.Error())
+		} else {
+			common.WriteError(ctx, fasthttp.StatusInternalServerError, "create update task")
+		}
+
+		return
 	}
+
+	common.WriteJSON(ctx, fasthttp.StatusAccepted, pushResponse{UpdateID: job.msg.ID()})
 }
 
 func (w *worker) run(ctx context.Context, done chan<- struct{}) {
@@ -264,31 +251,32 @@ func (w *worker) run(ctx context.Context, done chan<- struct{}) {
 }
 
 func (w *worker) processUpdate(task updateTask) {
-	w.setUpdateRunning(task.ID)
+	updateID := task.msg.ID()
+	w.setUpdateRunning(updateID)
 
-	if err := w.refreshRates(); err != nil {
-		w.setUpdateFailed(task.ID, err)
-		w.logger.Error("process rate update", zap.String("update_id", task.ID), zap.Error(err))
+	if err := w.refreshRatesFrom(task.client); err != nil {
+		w.setUpdateFailed(updateID, err)
+		w.logger.Error("process rate update", zap.String("update_id", updateID), zap.Error(err))
 
 		return
 	}
 
-	price, updatedAt, err := w.latestRate(task.Pair)
+	price, updatedAt, err := w.latestRate(task.msg.Pair)
 	if err != nil {
-		w.setUpdateFailed(task.ID, err)
-		w.logger.Error("calculate updated rate", zap.String("update_id", task.ID), zap.Error(err))
+		w.setUpdateFailed(updateID, err)
+		w.logger.Error("calculate updated rate", zap.String("update_id", updateID), zap.Error(err))
 
 		return
 	}
 
 	w.updatesMu.Lock()
-	result, ok := w.updates[task.ID]
+	result, ok := w.updates[updateID]
 	if ok {
 		result.Status = updateStatus.UpdateStatusSucceeded
 		result.Price = price
 		result.UpdatedAt = updatedAt
 		result.Error = ""
-		w.updates[task.ID] = result
+		w.updates[updateID] = result
 	}
 	w.updatesMu.Unlock()
 }
@@ -315,28 +303,20 @@ func (w *worker) setUpdateFailed(updateID string, updateErr error) {
 	w.updatesMu.Unlock()
 }
 
-func newUpdateID() (string, error) {
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
-		return "", fmt.Errorf("generate UUID: %w", err)
-	}
-
-	id[6] = id[6]&0x0f | 0x40
-	id[8] = id[8]&0x3f | 0x80
-
-	return fmt.Sprintf("%x-%x-%x-%x-%x", id[0:4], id[4:6], id[6:8], id[8:10], id[10:16]), nil
+func (w *worker) refreshRates() error {
+	return w.refreshRatesFrom(w.client)
 }
 
-func (w *worker) refreshRates() error {
-	actualCurrencies, err := w.source.GetCurrencies()
+func (w *worker) refreshRatesFrom(client *cbr.Client) error {
+	actualCurrencies, err := client.GetCurrencies()
 	if err != nil {
 		return err
 	}
 	if actualCurrencies == nil {
-		return errors.New("currency source returned an empty response")
+		return errors.New("CBR client returned an empty response")
 	}
 	if actualCurrencies.Date.IsZero() {
-		return errors.New("currency source returned an empty timestamp")
+		return errors.New("CBR client returned an empty timestamp")
 	}
 
 	rates := map[currencies.Currency]commonRate.Rate{

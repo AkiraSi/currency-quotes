@@ -11,8 +11,8 @@ type Config struct {
 
 func NewConfig() (*Config, error) {
 	portValue := os.Getenv("RATE_WORKER_PORT")
-	if portValue == "" {
-		return nil, nil
+	if len(portValue) == 0 {
+		return &Config{Port: 3000}, nil
 	}
 
 	port, err := strconv.Atoi(portValue)
