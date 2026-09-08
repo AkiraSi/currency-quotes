@@ -1,8 +1,6 @@
 package rate
 
 import (
-	"bufio"
-	"bytes"
 	"errors"
 
 	"currency-quotes/common/messages"
@@ -21,8 +19,11 @@ type updateTask struct {
 	client *cbr.Client
 }
 
-func newJob(client *cbr.Client) *job {
-	return &job{client: client}
+func newJob(msg messages.RateMsg, client *cbr.Client) *job {
+	return &job{
+		msg:    msg,
+		client: client,
+	}
 }
 
 func (j *job) CreateTasks(queue chan<- updateTask) error {
@@ -37,15 +38,4 @@ func (j *job) CreateTasks(queue chan<- updateTask) error {
 	default:
 		return errUpdateQueueFull
 	}
-}
-
-func (j *job) processMessage(data []byte) error {
-	var msg messages.RateMsg
-	if err := msg.Deserialize(bufio.NewReader(bytes.NewReader(data))); err != nil {
-		return err
-	}
-
-	j.msg = msg
-
-	return nil
 }

@@ -2,16 +2,19 @@ package rate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/valyala/fasthttp"
 	"go.uber.org/zap"
 
 	"currency-quotes/common/currencies"
 	commonLogger "currency-quotes/common/logger"
+	"currency-quotes/common/messages"
 	commonRate "currency-quotes/common/rate"
 	updateStatus "currency-quotes/common/update_status"
 	"currency-quotes/infrastructure/worker/common"
@@ -51,6 +54,10 @@ type latestRateResponse struct {
 
 type pushResponse struct {
 	UpdateID string `json:"update_id"`
+}
+
+type pushRequest struct {
+	Code string `json:"code"`
 }
 
 type updateResponse struct {
@@ -221,30 +228,29 @@ func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	job := newJob(w.client)
-	if err := job.processMessage(ctx.PostBody()); err != nil {
+	var request pushRequest
+	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
 		common.WriteError(ctx, fasthttp.StatusBadRequest, "invalid request body")
 
 		return
 	}
 
-	if job.msg.ID() == "" {
-		common.WriteError(ctx, fasthttp.StatusBadRequest, "message id is required")
-
-		return
-	}
-
-	code := currencies.CodeByCurrency(job.msg.Code)
-	if code != currencies.CodeErr {
+	code := currencies.CodeByCurrency(request.Code)
+	if code == currencies.CodeErr {
 		common.WriteError(ctx, fasthttp.StatusBadRequest, errUnsupportedCurrency.Error())
 
 		return
 	}
 
-	job.msg.Code = code.String()
+	updateID := uuid.NewString()
+
+	job := newJob(messages.RateMsg{
+		MsgID: updateID,
+		Code:  code.String(),
+	}, w.client)
 
 	w.updatesMu.Lock()
-	w.updates[job.msg.ID()] = updateResult{
+	w.updates[updateID] = updateResult{
 		Code:   job.msg.Code,
 		Status: updateStatus.UpdateStatusAccepted,
 	}
@@ -252,7 +258,7 @@ func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 
 	if err := job.CreateTasks(w.queue); err != nil {
 		w.updatesMu.Lock()
-		delete(w.updates, job.msg.ID())
+		delete(w.updates, updateID)
 		w.updatesMu.Unlock()
 
 		if errors.Is(err, errUpdateQueueFull) {
@@ -264,7 +270,7 @@ func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	common.WriteJSON(ctx, fasthttp.StatusAccepted, pushResponse{UpdateID: job.msg.ID()})
+	common.WriteJSON(ctx, fasthttp.StatusAccepted, pushResponse{UpdateID: updateID})
 }
 
 func (w *worker) run(ctx context.Context, done chan<- struct{}) {

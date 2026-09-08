@@ -1,4 +1,4 @@
 host: worker-rate
 port: 3001
-updateInterval: 1m
+updateInterval: 10m
 updateQueueCapacity: 50

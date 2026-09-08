@@ -3,6 +3,7 @@ module currency-quotes
 go 1.27
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/valyala/fasthttp v1.73.0
 	go.uber.org/zap v1.28.0
 	go.yaml.in/yaml/v3 v3.0.4
