@@ -1,4 +1,4 @@
-package rate
+package models
 
 import (
 	"time"

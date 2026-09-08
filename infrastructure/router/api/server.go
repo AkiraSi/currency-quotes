@@ -9,47 +9,25 @@ import (
 	"currency-quotes/common"
 )
 
-const (
-	apiPrefix     = "/api"
-	pushPath      = apiPrefix + "/push"
-	ratesPrefix   = apiPrefix + "/rates/"
-	updatesPrefix = apiPrefix + "/updates/"
-)
-
-type httpClient interface {
-	DoTimeout(req *fasthttp.Request, resp *fasthttp.Response, timeout time.Duration) error
-}
-
 type Server struct {
-	client         httpClient
-	workerAddress  string
+	client         *fasthttp.HostClient
 	requestTimeout time.Duration
 }
 
 func NewServer(workerAddress string, requestTimeout time.Duration) *Server {
-	return newServer(
-		&fasthttp.HostClient{Addr: workerAddress},
-		workerAddress,
-		requestTimeout,
-	)
-}
-
-func newServer(client httpClient, workerAddress string, requestTimeout time.Duration) *Server {
 	return &Server{
-		client:         client,
-		workerAddress:  workerAddress,
+		client:         &fasthttp.HostClient{Addr: workerAddress},
 		requestTimeout: requestTimeout,
 	}
 }
 
 func (s *Server) Handle(ctx *fasthttp.RequestCtx) {
-	path := string(ctx.Path())
-	method := string(ctx.Method())
+	path, method := string(ctx.Path()), string(ctx.Method())
 
 	switch {
 	case method == fasthttp.MethodGet && strings.HasPrefix(path, ratesPrefix) && len(path) > len(ratesPrefix):
 		s.GetRate(ctx)
-	case method == fasthttp.MethodPost && path == pushPath:
+	case method == fasthttp.MethodPost && path == "/api/push":
 		s.PushUpdate(ctx)
 	case method == fasthttp.MethodGet && strings.HasPrefix(path, updatesPrefix) && len(path) > len(updatesPrefix):
 		s.GetUpdate(ctx)

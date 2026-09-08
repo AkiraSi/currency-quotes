@@ -8,6 +8,12 @@ import (
 	"currency-quotes/common"
 )
 
+const (
+	apiPrefix     = "/api"
+	ratesPrefix   = apiPrefix + "/rates/"
+	updatesPrefix = apiPrefix + "/updates/"
+)
+
 func (s *Server) GetRate(ctx *fasthttp.RequestCtx) {
 	s.proxy(ctx, strings.TrimPrefix(string(ctx.Path()), apiPrefix))
 }
@@ -28,7 +34,7 @@ func (s *Server) proxy(ctx *fasthttp.RequestCtx, workerPath string) {
 
 	ctx.Request.CopyTo(request)
 	request.URI().SetPath(workerPath)
-	request.Header.SetHost(s.workerAddress)
+	request.Header.SetHost(s.client.Addr)
 
 	if err := s.client.DoTimeout(request, response, s.requestTimeout); err != nil {
 		common.WriteError(ctx, fasthttp.StatusBadGateway, "rate worker unavailable")

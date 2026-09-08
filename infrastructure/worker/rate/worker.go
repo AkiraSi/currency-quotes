@@ -16,7 +16,7 @@ import (
 	"currency-quotes/common/currencies"
 	commonLogger "currency-quotes/common/logger"
 	"currency-quotes/common/messages"
-	rateModels "currency-quotes/common/models/rate"
+	"currency-quotes/common/models"
 	updateStatus "currency-quotes/common/update_status"
 	workerCommon "currency-quotes/infrastructure/worker/common"
 	"currency-quotes/infrastructure/worker/rate/config"
@@ -37,7 +37,7 @@ type worker struct {
 	updateInterval time.Duration
 
 	ratesMu sync.RWMutex
-	rates   map[currencies.Currency]rateModels.Rate
+	rates   map[currencies.Currency]models.Rate
 	queue   chan updateTask
 
 	updatesMu sync.RWMutex
@@ -160,7 +160,7 @@ func (w *worker) handleLatestRate(ctx *fasthttp.RequestCtx, path string) {
 		return
 	}
 
-	common.WriteJSON(ctx, fasthttp.StatusOK, rateModels.LatestResponse{
+	common.WriteJSON(ctx, fasthttp.StatusOK, models.LatestResponse{
 		Price:     price,
 		UpdatedAt: updatedAt,
 	})
@@ -189,7 +189,7 @@ func (w *worker) handleUpdate(ctx *fasthttp.RequestCtx, path string) {
 		return
 	}
 
-	response := rateModels.UpdateResponse{Status: result.Status.String()}
+	response := models.UpdateResponse{Status: result.Status.String()}
 	switch result.Status {
 	case updateStatus.UpdateStatusSucceeded:
 		response.Status = ""
@@ -209,7 +209,7 @@ func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	var request rateModels.PushRequest
+	var request models.PushRequest
 	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
 		common.WriteError(ctx, fasthttp.StatusBadRequest, "invalid request body")
 
@@ -251,7 +251,7 @@ func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	common.WriteJSON(ctx, fasthttp.StatusAccepted, rateModels.PushResponse{UpdateID: updateID})
+	common.WriteJSON(ctx, fasthttp.StatusAccepted, models.PushResponse{UpdateID: updateID})
 }
 
 func (w *worker) run(ctx context.Context, done chan<- struct{}) {
@@ -333,7 +333,7 @@ func (w *worker) refreshRates() error {
 		return err
 	}
 
-	rates := map[currencies.Currency]rateModels.Rate{
+	rates := map[currencies.Currency]models.Rate{
 		currencies.CodeRub: {
 			Code:      currencies.CodeRub,
 			Nominal:   1,
@@ -348,7 +348,7 @@ func (w *worker) refreshRates() error {
 			continue
 		}
 
-		rates[code] = rateModels.Rate{
+		rates[code] = models.Rate{
 			Code:      code,
 			Nominal:   actualCurrency.Nominal,
 			Value:     actualCurrency.Value,

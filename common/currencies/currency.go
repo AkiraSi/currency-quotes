@@ -27,10 +27,6 @@ func (c Currency) String() string {
 	return currencies[c]
 }
 
-func CurrencyByCode(code Currency) string {
-	return code.String()
-}
-
 var stringToCurrency = map[string]Currency{
 	RUB: CodeRub,
 	EUR: CodeEur,
