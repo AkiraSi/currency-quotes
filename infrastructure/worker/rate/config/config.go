@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"currency-quotes/common"
 )
 
 const (
@@ -17,8 +19,6 @@ const (
 )
 
 var (
-	errHostRequired                = errors.New("host is required")
-	errPortInvalid                 = errors.New("port must be between 1 and 65535")
 	errUpdateIntervalRequired      = errors.New("updateInterval must be greater than zero")
 	errUpdateQueueCapacityRequired = errors.New("updateQueueCapacity must be greater than zero")
 )
@@ -79,10 +79,10 @@ func load(path string) (*Config, error) {
 
 func (c *Config) validate() error {
 	if c.Host == "" {
-		return errHostRequired
+		return common.ErrHostRequired
 	}
-	if c.Port <= 0 {
-		return errPortInvalid
+	if c.Port < common.MinPort || c.Port > common.MaxPort {
+		return common.ErrPortInvalid
 	}
 	if c.UpdateInterval <= 0 {
 		return errUpdateIntervalRequired

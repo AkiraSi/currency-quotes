@@ -12,12 +12,13 @@ import (
 	"github.com/valyala/fasthttp"
 	"go.uber.org/zap"
 
+	"currency-quotes/common"
 	"currency-quotes/common/currencies"
 	commonLogger "currency-quotes/common/logger"
 	"currency-quotes/common/messages"
-	commonRate "currency-quotes/common/rate"
+	rateModels "currency-quotes/common/models/rate"
 	updateStatus "currency-quotes/common/update_status"
-	"currency-quotes/infrastructure/worker/common"
+	workerCommon "currency-quotes/infrastructure/worker/common"
 	"currency-quotes/infrastructure/worker/rate/config"
 	"currency-quotes/pkg/clients/cbr"
 )
@@ -36,7 +37,7 @@ type worker struct {
 	updateInterval time.Duration
 
 	ratesMu sync.RWMutex
-	rates   map[currencies.Currency]commonRate.Rate
+	rates   map[currencies.Currency]rateModels.Rate
 	queue   chan updateTask
 
 	updatesMu sync.RWMutex
@@ -47,26 +48,6 @@ type worker struct {
 	done        chan struct{}
 }
 
-type latestRateResponse struct {
-	Price     float64   `json:"price"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type pushResponse struct {
-	UpdateID string `json:"update_id"`
-}
-
-type pushRequest struct {
-	Code string `json:"code"`
-}
-
-type updateResponse struct {
-	Status    string     `json:"status,omitempty"`
-	Price     *float64   `json:"price,omitempty"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
-	Error     string     `json:"error,omitempty"`
-}
-
 type updateResult struct {
 	Code      string
 	Status    updateStatus.UpdateStatus
@@ -75,7 +56,7 @@ type updateResult struct {
 	Error     string
 }
 
-func NewWorker(cfg *config.Config, lgr commonLogger.Logger) common.Worker {
+func NewWorker(cfg *config.Config, lgr commonLogger.Logger) workerCommon.Worker {
 	w := &worker{
 		config:         cfg,
 		logger:         lgr,
@@ -179,7 +160,7 @@ func (w *worker) handleLatestRate(ctx *fasthttp.RequestCtx, path string) {
 		return
 	}
 
-	common.WriteJSON(ctx, fasthttp.StatusOK, latestRateResponse{
+	common.WriteJSON(ctx, fasthttp.StatusOK, rateModels.LatestResponse{
 		Price:     price,
 		UpdatedAt: updatedAt,
 	})
@@ -208,7 +189,7 @@ func (w *worker) handleUpdate(ctx *fasthttp.RequestCtx, path string) {
 		return
 	}
 
-	response := updateResponse{Status: result.Status.String()}
+	response := rateModels.UpdateResponse{Status: result.Status.String()}
 	switch result.Status {
 	case updateStatus.UpdateStatusSucceeded:
 		response.Status = ""
@@ -228,7 +209,7 @@ func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	var request pushRequest
+	var request rateModels.PushRequest
 	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
 		common.WriteError(ctx, fasthttp.StatusBadRequest, "invalid request body")
 
@@ -270,7 +251,7 @@ func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	common.WriteJSON(ctx, fasthttp.StatusAccepted, pushResponse{UpdateID: updateID})
+	common.WriteJSON(ctx, fasthttp.StatusAccepted, rateModels.PushResponse{UpdateID: updateID})
 }
 
 func (w *worker) run(ctx context.Context, done chan<- struct{}) {
@@ -352,7 +333,7 @@ func (w *worker) refreshRates() error {
 		return err
 	}
 
-	rates := map[currencies.Currency]commonRate.Rate{
+	rates := map[currencies.Currency]rateModels.Rate{
 		currencies.CodeRub: {
 			Code:      currencies.CodeRub,
 			Nominal:   1,
@@ -367,7 +348,7 @@ func (w *worker) refreshRates() error {
 			continue
 		}
 
-		rates[code] = commonRate.Rate{
+		rates[code] = rateModels.Rate{
 			Code:      code,
 			Nominal:   actualCurrency.Nominal,
 			Value:     actualCurrency.Value,
