@@ -26,8 +26,8 @@ var (
 type Config struct {
 	Host                string        `yaml:"host"`
 	Port                int           `yaml:"port"`
-	UpdateInterval      time.Duration `yaml:"updateInterval"`
 	UpdateQueueCapacity int           `yaml:"updateQueueCapacity"`
+	UpdateInterval      time.Duration `yaml:"updateInterval"`
 }
 
 func NewConfig() (*Config, error) {

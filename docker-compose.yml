@@ -1,0 +1,16 @@
+services:
+  router:
+    build:
+      context: .
+      dockerfile: infrastructure/router/Dockerfile
+    environment:
+      PROFILE: prod
+    ports:
+      - "3000:3000"
+
+  worker-rate:
+    build:
+      context: .
+      dockerfile: infrastructure/worker/Dockerfile
+    environment:
+      PROFILE: prod

@@ -28,9 +28,9 @@ var (
 
 type Config struct {
 	Host           string        `yaml:"host"`
-	Port           int           `yaml:"port"`
 	RateWorkerHost string        `yaml:"rateWorkerHost"`
 	RateWorkerPort int           `yaml:"rateWorkerPort"`
+	Port           int           `yaml:"port"`
 	RequestTimeout time.Duration `yaml:"requestTimeout"`
 }
 
