@@ -20,6 +20,7 @@ type cbrCurrency struct {
 	Value   float64 `json:"Value"`
 }
 
+//nolint:mnd
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/daily_json.js", serveCurrencies)
@@ -36,6 +37,7 @@ func main() {
 	}
 }
 
+//nolint:mnd
 func serveCurrencies(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
 		writer.Header().Set("Allow", http.MethodGet)

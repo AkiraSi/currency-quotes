@@ -47,6 +47,10 @@ func main() {
 			return
 		}
 
+		if err := cfg.Print(); err != nil {
+			lgr.Error("print worker config", zap.Error(err))
+		}
+
 		worker = workerRate.NewWorker(cfg, lgr)
 		port = cfg.Port
 	default:
@@ -65,9 +69,9 @@ func main() {
 	httpServer := &fasthttp.Server{
 		Name:               workerType.String() + "_worker",
 		Handler:            worker.CreateHTTPHandler(),
-		ReadBufferSize:     1 << 12,
-		WriteBufferSize:    1 << 12,
-		MaxRequestBodySize: 1 << 12,
+		ReadBufferSize:     1 << 12, //nolint:mnd
+		WriteBufferSize:    1 << 12, //nolint:mnd
+		MaxRequestBodySize: 1 << 12, //nolint:mnd
 		CloseOnShutdown:    true,
 	}
 
@@ -83,7 +87,7 @@ func main() {
 
 	<-sigChan
 
-	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second) //nolint:mnd
 	defer cancel()
 
 	if err := httpServer.Shutdown(); err != nil {

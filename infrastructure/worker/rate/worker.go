@@ -3,7 +3,6 @@ package rate
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -18,11 +17,6 @@ import (
 	"currency-quotes/infrastructure/worker/common"
 	"currency-quotes/infrastructure/worker/rate/config"
 	"currency-quotes/pkg/clients/cbr"
-)
-
-const (
-	updateInterval      = time.Minute
-	updateQueueCapacity = 50
 )
 
 var (
@@ -75,14 +69,16 @@ type updateResult struct {
 }
 
 func NewWorker(cfg *config.Config, lgr commonLogger.Logger) common.Worker {
-	return &worker{
+	w := &worker{
 		config:         cfg,
 		logger:         lgr,
 		client:         cbr.NewClient(),
-		updateInterval: updateInterval,
-		queue:          make(chan updateTask, updateQueueCapacity),
 		updates:        make(map[string]updateResult),
+		updateInterval: cfg.UpdateInterval,
+		queue:          make(chan updateTask, cfg.UpdateQueueCapacity),
 	}
+
+	return w
 }
 
 func (w *worker) Init(ctx context.Context) error {
@@ -343,6 +339,8 @@ func (w *worker) setUpdateFailed(updateID string, updateErr error) {
 }
 
 func (w *worker) refreshRates() error {
+	w.logger.Info("refresh rates")
+
 	actualCurrencies, err := w.client.GetCurrencies()
 	if err != nil {
 		return err
@@ -361,9 +359,6 @@ func (w *worker) refreshRates() error {
 		code := currencies.Currency(actualCurrency.NumCode)
 		if code != currencies.CodeEur && code != currencies.CodeUSD {
 			continue
-		}
-		if actualCurrency.Nominal <= 0 || actualCurrency.Value <= 0 {
-			return fmt.Errorf("invalid %s rate", code.String())
 		}
 
 		rates[code] = commonRate.Rate{

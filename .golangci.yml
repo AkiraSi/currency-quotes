@@ -17,7 +17,6 @@ linters:
     - ireturn
     - testpackage
     - gochecknoglobals
-    - mnd # врубить после
     - exhaustive
     - err113
     - depguard
