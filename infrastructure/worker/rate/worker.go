@@ -26,9 +26,10 @@ const (
 )
 
 var (
-	errMalformedPair       = errors.New("malformed currency pair")
+	errMalformedCurrency   = errors.New("malformed currency code")
 	errUnsupportedCurrency = errors.New("unsupported currency")
 	errRateUnavailable     = errors.New("rate unavailable")
+	errUpdateIDRequired    = errors.New("update id is required")
 )
 
 type worker struct {
@@ -58,8 +59,15 @@ type pushResponse struct {
 	UpdateID string `json:"update_id"`
 }
 
+type updateResponse struct {
+	Status    string     `json:"status,omitempty"`
+	Price     *float64   `json:"price,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	Error     string     `json:"error,omitempty"`
+}
+
 type updateResult struct {
-	Pair      string
+	Code      string
 	Status    updateStatus.UpdateStatus
 	Price     float64
 	UpdatedAt time.Time
@@ -134,6 +142,8 @@ func (w *worker) handleHTTP(ctx *fasthttp.RequestCtx) {
 	switch {
 	case path == "/push":
 		w.handlePush(ctx)
+	case strings.HasPrefix(path, "/updates/"):
+		w.handleUpdate(ctx, path)
 	case strings.HasPrefix(path, "/rates/"):
 		w.handleLatestRate(ctx, path)
 	default:
@@ -149,11 +159,11 @@ func (w *worker) handleLatestRate(ctx *fasthttp.RequestCtx, path string) {
 		return
 	}
 
-	pair := strings.TrimPrefix(path, "/rates/")
-	price, updatedAt, err := w.latestRate(pair)
+	code := strings.TrimPrefix(path, "/rates/")
+	price, updatedAt, err := w.latestRate(code)
 	if err != nil {
 		switch {
-		case errors.Is(err, errMalformedPair):
+		case errors.Is(err, errMalformedCurrency):
 			common.WriteError(ctx, fasthttp.StatusBadRequest, err.Error())
 		case errors.Is(err, errUnsupportedCurrency):
 			common.WriteError(ctx, fasthttp.StatusNotFound, err.Error())
@@ -172,9 +182,44 @@ func (w *worker) handleLatestRate(ctx *fasthttp.RequestCtx, path string) {
 	})
 }
 
+func (w *worker) handleUpdate(ctx *fasthttp.RequestCtx, path string) {
+	if !ctx.IsGet() {
+		common.WriteError(ctx, fasthttp.StatusMethodNotAllowed, "method not allowed")
+
+		return
+	}
+
+	updateID := strings.TrimPrefix(path, "/updates/")
+	if updateID == "" {
+		common.WriteError(ctx, fasthttp.StatusBadRequest, errUpdateIDRequired.Error())
+
+		return
+	}
+
+	w.updatesMu.RLock()
+	result, ok := w.updates[updateID]
+	w.updatesMu.RUnlock()
+	if !ok {
+		common.WriteError(ctx, fasthttp.StatusNotFound, "update not found")
+
+		return
+	}
+
+	response := updateResponse{Status: result.Status.String()}
+	switch result.Status {
+	case updateStatus.UpdateStatusSucceeded:
+		response.Status = ""
+		response.Price = &result.Price
+		response.UpdatedAt = &result.UpdatedAt
+	case updateStatus.UpdateStatusFailed:
+		response.Error = result.Error
+	}
+
+	common.WriteJSON(ctx, fasthttp.StatusOK, response)
+}
+
 func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 	if !ctx.IsPost() {
-		ctx.Response.Header.Set("Allow", fasthttp.MethodPost)
 		common.WriteError(ctx, fasthttp.StatusMethodNotAllowed, "method not allowed")
 
 		return
@@ -193,22 +238,18 @@ func (w *worker) handlePush(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	base, quote, err := parsePair(job.msg.Pair)
-	if err != nil {
-		if errors.Is(err, errUnsupportedCurrency) {
-			common.WriteError(ctx, fasthttp.StatusNotFound, err.Error())
-		} else {
-			common.WriteError(ctx, fasthttp.StatusBadRequest, err.Error())
-		}
+	code := currencies.CodeByCurrency(job.msg.Code)
+	if code != currencies.CodeErr {
+		common.WriteError(ctx, fasthttp.StatusBadRequest, errUnsupportedCurrency.Error())
 
 		return
 	}
 
-	job.msg.Pair = base.String() + "/" + quote.String()
+	job.msg.Code = code.String()
 
 	w.updatesMu.Lock()
 	w.updates[job.msg.ID()] = updateResult{
-		Pair:   job.msg.Pair,
+		Code:   job.msg.Code,
 		Status: updateStatus.UpdateStatusAccepted,
 	}
 	w.updatesMu.Unlock()
@@ -254,14 +295,14 @@ func (w *worker) processUpdate(task updateTask) {
 	updateID := task.msg.ID()
 	w.setUpdateRunning(updateID)
 
-	if err := w.refreshRatesFrom(task.client); err != nil {
+	if err := w.refreshRates(); err != nil {
 		w.setUpdateFailed(updateID, err)
 		w.logger.Error("process rate update", zap.String("update_id", updateID), zap.Error(err))
 
 		return
 	}
 
-	price, updatedAt, err := w.latestRate(task.msg.Pair)
+	price, updatedAt, err := w.latestRate(task.msg.Code)
 	if err != nil {
 		w.setUpdateFailed(updateID, err)
 		w.logger.Error("calculate updated rate", zap.String("update_id", updateID), zap.Error(err))
@@ -275,7 +316,6 @@ func (w *worker) processUpdate(task updateTask) {
 		result.Status = updateStatus.UpdateStatusSucceeded
 		result.Price = price
 		result.UpdatedAt = updatedAt
-		result.Error = ""
 		w.updates[updateID] = result
 	}
 	w.updatesMu.Unlock()
@@ -286,7 +326,6 @@ func (w *worker) setUpdateRunning(updateID string) {
 	result, ok := w.updates[updateID]
 	if ok {
 		result.Status = updateStatus.UpdateStatusRunning
-		result.Error = ""
 		w.updates[updateID] = result
 	}
 	w.updatesMu.Unlock()
@@ -304,19 +343,9 @@ func (w *worker) setUpdateFailed(updateID string, updateErr error) {
 }
 
 func (w *worker) refreshRates() error {
-	return w.refreshRatesFrom(w.client)
-}
-
-func (w *worker) refreshRatesFrom(client *cbr.Client) error {
-	actualCurrencies, err := client.GetCurrencies()
+	actualCurrencies, err := w.client.GetCurrencies()
 	if err != nil {
 		return err
-	}
-	if actualCurrencies == nil {
-		return errors.New("CBR client returned an empty response")
-	}
-	if actualCurrencies.Date.IsZero() {
-		return errors.New("CBR client returned an empty timestamp")
 	}
 
 	rates := map[currencies.Currency]commonRate.Rate{
@@ -344,11 +373,6 @@ func (w *worker) refreshRatesFrom(client *cbr.Client) error {
 			UpdatedAt: actualCurrencies.Date,
 		}
 	}
-	for _, code := range []currencies.Currency{currencies.CodeEur, currencies.CodeUSD} {
-		if _, ok := rates[code]; !ok {
-			return fmt.Errorf("%s rate is missing", code.String())
-		}
-	}
 
 	w.ratesMu.Lock()
 	w.rates = rates
@@ -357,42 +381,21 @@ func (w *worker) refreshRatesFrom(client *cbr.Client) error {
 	return nil
 }
 
-func (w *worker) latestRate(pair string) (float64, time.Time, error) {
-	base, quote, err := parsePair(pair)
-	if err != nil {
-		return 0, time.Time{}, err
+func (w *worker) latestRate(currencyCode string) (float64, time.Time, error) {
+	code := currencies.CodeByCurrency(currencyCode)
+	if code == currencies.CodeErr {
+		return 0, time.Time{}, errUnsupportedCurrency
 	}
 
 	w.ratesMu.RLock()
-	baseRate, baseOK := w.rates[base]
-	quoteRate, quoteOK := w.rates[quote]
+	rate, ok := w.rates[code]
 	w.ratesMu.RUnlock()
 
-	if !baseOK || !quoteOK || baseRate.Nominal <= 0 || quoteRate.Nominal <= 0 || baseRate.Value <= 0 || quoteRate.Value <= 0 {
+	if !ok {
 		return 0, time.Time{}, errRateUnavailable
 	}
 
-	baseRubValue := float64(baseRate.Value) / float64(baseRate.Nominal)
-	quoteRubValue := float64(quoteRate.Value) / float64(quoteRate.Nominal)
-	updatedAt := baseRate.UpdatedAt
-	if quoteRate.UpdatedAt.Before(updatedAt) {
-		updatedAt = quoteRate.UpdatedAt
-	}
+	price := float64(rate.Value) / float64(rate.Nominal) / currencies.RateValueScale
 
-	return baseRubValue / quoteRubValue, updatedAt, nil
-}
-
-func parsePair(pair string) (currencies.Currency, currencies.Currency, error) {
-	parts := strings.Split(strings.ToUpper(strings.TrimSpace(pair)), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return currencies.CodeErr, currencies.CodeErr, errMalformedPair
-	}
-
-	base := currencies.CodeByCurrency(parts[0])
-	quote := currencies.CodeByCurrency(parts[1])
-	if base == currencies.CodeErr || quote == currencies.CodeErr {
-		return currencies.CodeErr, currencies.CodeErr, errUnsupportedCurrency
-	}
-
-	return base, quote, nil
+	return price, rate.UpdatedAt, nil
 }

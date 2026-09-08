@@ -27,12 +27,6 @@ func (c Currency) String() string {
 	return currencies[c]
 }
 
-var currencyToString = map[Currency]string{
-	CodeRub: RUB,
-	CodeEur: EUR,
-	CodeUSD: USD,
-}
-
 func CurrencyByCode(code Currency) string {
 	return code.String()
 }

@@ -25,17 +25,6 @@ func newJob(client *cbr.Client) *job {
 	return &job{client: client}
 }
 
-func (j *job) processMessage(data []byte) error {
-	var msg messages.RateMsg
-	if err := msg.Deserialize(bufio.NewReader(bytes.NewReader(data))); err != nil {
-		return err
-	}
-
-	j.msg = msg
-
-	return nil
-}
-
 func (j *job) CreateTasks(queue chan<- updateTask) error {
 	task := updateTask{
 		msg:    j.msg,
@@ -48,4 +37,15 @@ func (j *job) CreateTasks(queue chan<- updateTask) error {
 	default:
 		return errUpdateQueueFull
 	}
+}
+
+func (j *job) processMessage(data []byte) error {
+	var msg messages.RateMsg
+	if err := msg.Deserialize(bufio.NewReader(bytes.NewReader(data))); err != nil {
+		return err
+	}
+
+	j.msg = msg
+
+	return nil
 }

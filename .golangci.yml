@@ -1,5 +1,32 @@
 version: "2"
 
+linters:
+  default: all
+  disable:
+    - gosec
+    - tagliatelle
+    - noinlineerr
+    - revive
+    - exhaustruct
+    - wsl_v5
+    - wsl
+    - wrapcheck
+    - varnamelen
+    - tparallel
+    - paralleltest
+    - ireturn
+    - testpackage
+    - gochecknoglobals
+    - mnd # врубить после
+    - exhaustive
+    - err113
+    - depguard
+    - exhaustruct_v5
+  settings:
+    funlen:
+      lines: 300
+      statements: 300
+
 formatters:
   enable:
     - gci

@@ -13,7 +13,7 @@ const (
 
 type RateMsg struct {
 	MsgID string
-	Pair  string
+	Code  string
 }
 
 func (msg *RateMsg) ID() string {
@@ -25,7 +25,7 @@ func (msg *RateMsg) Serialize(br *bufio.ReadWriter) error {
 	br.WriteByte(rateMsgVersion)
 	br.WriteString(msg.MsgID)
 	br.WriteByte(rateMsgDelimiter)
-	br.WriteString(msg.Pair)
+	br.WriteString(msg.Code)
 
 	return br.WriteByte(rateMsgDelimiter)
 }
@@ -49,10 +49,10 @@ func (msg *RateMsg) Deserialize(br *bufio.Reader) error {
 	}
 	msg.MsgID = strings.TrimSuffix(msg.MsgID, string(rateMsgDelimiter))
 
-	if msg.Pair, err = br.ReadString(rateMsgDelimiter); err != nil {
+	if msg.Code, err = br.ReadString(rateMsgDelimiter); err != nil {
 		return err
 	}
-	msg.Pair = strings.TrimSuffix(msg.Pair, string(rateMsgDelimiter))
+	msg.Code = strings.TrimSuffix(msg.Code, string(rateMsgDelimiter))
 
 	return nil
 }
